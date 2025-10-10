@@ -1,0 +1,31 @@
+# Equivalent to the above, but with manually maintained Zephyr modules.
+manifest:
+  # This is the west version that this manifest is compatible with.
+  version: 1.2
+
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+
+  defaults:
+    remote: zephyrproject-rtos
+
+  projects:
+    - name: zephyr
+      revision: v4.1.0
+      import:
+        file: west.yml
+        path-prefix: deps
+        name-allowlist:
+          - hal_stm32
+          - hal_nordic
+          - cmsis
+          - segger
+          - mcuboot
+          - mbedtls
+          - zcbor
+          
+
+  # Entries in the 'self' key are only applied to the _manifest repository_. 
+  self:
+    path: app 
