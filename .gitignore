@@ -1,0 +1,16 @@
+# Build files
+build/
+
+# Temporary files
+*.tmp
+*.log
+*.swp
+
+# VS Code specific files
+.vscode/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+*.code-workspace
