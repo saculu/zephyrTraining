@@ -25,6 +25,8 @@ int main(void)
 	int ret;
 	bool led_state = true;
 
+	SEGGER_SYSVIEW_SendSysDesc("I#15=Systick_IRQ");
+
 	if (!gpio_is_ready_dt(&led)) {
 		return 0;
 	}
