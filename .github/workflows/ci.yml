@@ -15,7 +15,7 @@ jobs:
         with:
           # Clone the repo to a subdirectory, so we can initialize the Zephyr
           # workspace in the parent directory.
-          #path: zephyr-workspace/zephyrTraining
+          path: app
 
       - name: 🧰 Install Dependencies + West
         # Install the Zephyr host build dependencies, and the `west` Python tool.
