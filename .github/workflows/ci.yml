@@ -44,14 +44,14 @@ jobs:
       - name: ♻️ Initialize Zephyr Workspace
         # Set up the Zephyr workspace and install the Python dependencies
         run: |
-          cd zephyr-workspace
+        #   cd zephyr-workspace
           west init -l app
           west update --narrow -o=--depth=1
           pip3 install -r zephyr/scripts/requirements.txt
 
       - name: 🔨 Build Project
         run: |
-          cd zephyr-workspace
+        #   cd zephyr-workspace
           west build \
             --board nrf7002dk_nrf5340_cpuapp \
             --pristine=always 00-blinky
