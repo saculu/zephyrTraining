@@ -15,7 +15,7 @@ jobs:
         with:
           # Clone the repo to a subdirectory, so we can initialize the Zephyr
           # workspace in the parent directory.
-          path: app
+          path: zephyrTraining/app
 
       - name: 🧰 Install Dependencies + West
         # Install the Zephyr host build dependencies, and the `west` Python tool.
@@ -44,14 +44,14 @@ jobs:
       - name: ♻️ Initialize Zephyr Workspace
         # Set up the Zephyr workspace and install the Python dependencies
         run: |
-          #cd zephyr-workspace
+          cd zephyrTraining
           west init -l app
           west update --narrow -o=--depth=1
           pip3 install -r zephyr/scripts/requirements.txt
 
       - name: 🔨 Build Project
         run: |
-          #cd zephyr-workspace
+          cd zephyrTraining/app
           west build \
-          --board nrf7002dk_nrf5340_cpuapp \
-          --pristine=always 00-blinky
+            --board nrf7002dk_nrf5340_cpuapp \
+            --pristine=always 00-blinky
