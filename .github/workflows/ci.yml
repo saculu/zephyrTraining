@@ -53,5 +53,5 @@ jobs:
         run: |
           cd zephyrTraining/app
           west build \
-            --board nrf7002dk_nrf5340_cpuapp \
+            --board nrf7002dk/nrf5340/cpuapp \
             --pristine=always 00-blinky
