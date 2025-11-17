@@ -42,7 +42,8 @@ jobs:
         # Set up the Zephyr workspace and install the Python dependencies
         run: |
           west init -l .
-          west update
+          cd ..
+          west update --narrow -o=--depth=1
           pip3 install -r deps/zephyr/scripts/requirements.txt
 
       - name: 🔨 Build Project
