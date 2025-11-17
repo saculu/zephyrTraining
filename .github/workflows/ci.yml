@@ -50,4 +50,4 @@ jobs:
         run: |
           west build \
             --board nrf7002dk/nrf5340/cpuapp \
-            --pristine=always app/00-blinky
+            --pristine=always 00-blinky
