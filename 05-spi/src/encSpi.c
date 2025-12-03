@@ -1,6 +1,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/spi.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/shell/shell.h>
 
 LOG_MODULE_REGISTER(spi_enc);
 
@@ -23,6 +24,115 @@ LOG_MODULE_REGISTER(spi_enc);
 #define ENCSPI_SETTINGS1 0x0018U
 #define ENCSPI_SETTINGS2 0x0019U
 #define ENCSPI_RED       0x001AU
+
+/* ============ Register Unions with Bitfields ============ */
+
+/* ERRFL Register (0x0001) - Error flags */
+typedef union {
+    uint16_t raw;
+    struct {
+        uint16_t frerr   : 1;  /* Bit 0: Framing error is set to 1 when a non-compliant SPI
+frame is detected */
+        uint16_t invcomm : 1;  /* Bit 1: Invalid command */
+        uint16_t parerr  : 1;  /* Bit 2: Parity error */
+        uint16_t reserved: 13; /* Bits 3-15: Reserved */
+    } bits;
+} errfl_reg_t;
+
+/* PROG Register (0x0003) - Programming control */
+typedef union {
+    uint16_t raw;
+    struct {
+        uint16_t progen    : 1;  /* Bit 0: Program OTP enable: enables reading / writing the OTP memory */
+        uint16_t reserved1 : 1;  /* Bit 1: Reserved */
+        uint16_t otpref    : 1;  /* Bit 2: Refreshes the non-volatile memory content with the OTP programmed content */
+        uint16_t progotp   : 1;  /* Bit 3: Start OTP programming cyclee */
+        uint16_t reserved2 : 2;  /* Bits 4-5: Reserved */
+        uint16_t progver   : 1;  /* Bit 6: Verify OTP programming */
+        uint16_t reserved3 : 9;  /* Bits 7-15: Reserved */
+    } bits;
+} prog_reg_t;
+
+/* DIAAGC Register (0x3FFC) - Diagnostics and AGC */
+typedef union {
+    uint16_t raw;
+    struct {
+        uint16_t agc  : 8;  /* Bits 7:0: Automatic gain control value */
+        uint16_t lf   : 1;  /* Bit 8: Loops finished (0=not ready, 1=finished) */
+        uint16_t cof  : 1;  /* Bit 9: CORDIC overflow */
+        uint16_t magh : 1;  /* Bit 10: Magnetic field too high (AGC=0x00) */
+        uint16_t magl : 1;  /* Bit 11: Magnetic field too low (AGC=0xFF) */
+        uint16_t reserved : 4; /* Bits 12-15: Reserved/unused */
+    } bits;
+} diaagc_reg_t;
+
+/* MAG Register (0x3FFD) - CORDIC magnitude */
+typedef union {
+    uint16_t raw;
+    struct {
+        uint16_t cmag : 14; /* Bits 0-13: CORDIC magnitude */
+        uint16_t reserved : 2; /* Bits 14-15: Reserved */
+    } bits;
+} mag_reg_t;
+
+/* ANGLE Register (0x3FFE/0x3FFF) - Angle value */
+typedef union {
+    uint16_t raw;
+    struct {
+        uint16_t angle : 14; /* Bits 0-13: Angle value (14-bit) */
+        uint16_t reserved : 2; /* Bits 14-15: Reserved */
+    } bits;
+} angle_reg_t;
+
+
+
+/* ============ Print functions for registers ============ */
+
+static void print_errfl(errfl_reg_t reg)
+{
+    LOG_INF("ERRFL: 0x%04X", reg.raw);
+    LOG_INF("  FRERR   [0]: %u - Framing error", reg.bits.frerr);
+    LOG_INF("  INVCOMM [1]: %u - Invalid command", reg.bits.invcomm);
+    LOG_INF("  PARERR  [2]: %u - Parity error", reg.bits.parerr);
+}
+
+static void print_prog(prog_reg_t reg)
+{
+    LOG_INF("PROG: 0x%04X", reg.raw);
+    LOG_INF("  PROGEN  [3]: %u - Programming enable", reg.bits.progen);
+    LOG_INF("  OTPREF  [4]: %u - OTP refresh", reg.bits.otpref);
+    LOG_INF("  PROGOTP [5]: %u - OTP programming enable", reg.bits.progotp);
+    LOG_INF("  PROGVER [6]: %u - Programming verify", reg.bits.progver);
+}
+
+static void print_diaagc(diaagc_reg_t reg)
+{
+    LOG_INF("DIAAGC: 0x%04X", reg.raw);
+    LOG_INF("  AGC  [7:0]:  %u (0x%02X) - Automatic gain control", reg.bits.agc, reg.bits.agc);
+    LOG_INF("  LF   [8]:    %u - Loops finished (%s)", reg.bits.lf, 
+            reg.bits.lf ? "offset loop finished" : "offset loops not ready");
+    LOG_INF("  COF  [9]:    %u - CORDIC overflow", reg.bits.cof);
+    LOG_INF("  MAGH [10]:   %u - Magnetic field too high (AGC=0x00)", reg.bits.magh);
+    LOG_INF("  MAGL [11]:   %u - Magnetic field too low (AGC=0xFF)", reg.bits.magl);
+}
+
+static void print_mag(mag_reg_t reg)
+{
+    LOG_INF("MAG: 0x%04X", reg.raw);
+    LOG_INF("  CMAG [13:0]: %u - CORDIC magnitude", reg.bits.cmag);
+}
+
+static void print_angle(angle_reg_t reg)
+{
+    uint32_t degrees_x100 = ((uint32_t)reg.bits.angle * 36000) / 16384;
+    LOG_INF("ANGLE: 0x%04X", reg.raw);
+    LOG_INF("  ANGLE [13:0]: %u (degrees: %u.%02u)", 
+            reg.bits.angle, degrees_x100 / 100, degrees_x100 % 100);
+}
+
+/* ======================================================= */
+
+
 
 /* encSPI uses 16-bit SPI frames */
 /* encspi uses SPI Mode 1: CPOL=0, CPHA=1 */
@@ -99,20 +209,24 @@ static int encspi_read_reg(uint16_t reg_addr, uint16_t *data)
 /* Read all non-volatile registers using individual reads */
 static int encspi_read_nv_registers(void)   
 {
-	uint16_t zposm, zposl, settings1, settings2, red;
-
+	uint16_t zposm;
+	uint16_t zposl;
+	uint16_t settings1;
+	uint16_t settings2;
+	uint16_t red;
+    
 	if (encspi_read_reg(ENCSPI_ZPOSM, &zposm) != 0) return -1;
 	if (encspi_read_reg(ENCSPI_ZPOSL, &zposl) != 0) return -1;
 	if (encspi_read_reg(ENCSPI_SETTINGS1, &settings1) != 0) return -1;
 	if (encspi_read_reg(ENCSPI_SETTINGS2, &settings2) != 0) return -1;
 	if (encspi_read_reg(ENCSPI_RED, &red) != 0) return -1;
 
-	LOG_INF("NV Registers:");
-	LOG_INF("ZPOSM: 0x%04X", zposm);
-	LOG_INF("ZPOSL: 0x%04X", zposl);
-	LOG_INF("SETTINGS1: 0x%04X", settings1);
-	LOG_INF("SETTINGS2: 0x%04X", settings2);
-	LOG_INF("RED: 0x%04X", red);
+	LOG_INF("=== NV Registers ===");
+    LOG_INF("ZPOSM:     0x%04X", zposm);
+    LOG_INF("ZPOSL:     0x%04X", zposl);
+    LOG_INF("SETTINGS1: 0x%04X", settings1);
+    LOG_INF("SETTINGS2: 0x%04X", settings2);
+    LOG_INF("RED:       0x%04X", red);
 
 	return 0;
 }
@@ -125,40 +239,58 @@ void th_encSpi(void *arg1, void *arg2, void *arg3)
         LOG_ERR("Error: SPI device is not ready, err: %d", err);
     }
 
-    uint16_t reg_value;
+    /* Register unions */
+    errfl_reg_t errfl;
+    prog_reg_t prog;
+    diaagc_reg_t diaagc;
+    mag_reg_t mag;
+    angle_reg_t angleUnc; // uncompensated angle
+    angle_reg_t angleCom; // compensated angle
+
+    /* Read all non-volatile registers at startup */
+    encspi_read_nv_registers();
 
     // SPI encoder handling code goes here
     while (1) {
 
-        if (encspi_read_reg(ENCSPI_ERRFL, &reg_value) == 0) {
-            LOG_INF("ERRFL: 0x%04X", reg_value);
+        if (encspi_read_reg(ENCSPI_ERRFL, &errfl.raw) == 0) {
+            if (errfl.raw  != 0){
+                LOG_WRN("Encoder Error Flags Set!");
+                print_errfl(errfl);
+            }
         }
 
-        if (encspi_read_reg(ENCSPI_PROG, &reg_value) == 0) {
-            LOG_INF("PROG: 0x%04X", reg_value);
+        if (encspi_read_reg(ENCSPI_PROG, &prog.raw) == 0) {
+            if (prog.bits.progen != 0) {
+                print_prog(prog);
+                LOG_WRN("Encoder PROGEN is disabled!");
+            }        
         }
 
-        if (encspi_read_reg(ENCSPI_DIAAGC, &reg_value) == 0) {
-            LOG_INF("DIAAGC: 0x%04X", reg_value);
+        if (encspi_read_reg(ENCSPI_DIAAGC, &diaagc.raw) == 0) {
+            print_diaagc(diaagc);
         }
 
-        if (encspi_read_reg(ENCSPI_MAG, &reg_value) == 0) {
-			LOG_INF("MAG: 0x%04X", reg_value);
-		}
-
-        if (encspi_read_reg(ENCSPI_ANGLECOM, &reg_value) == 0) {
-            /* Convert to degrees: (value * 360) / 16384 */
-            uint32_t degrees_x100 = ((uint32_t)reg_value * 36000) / 16384;
-            LOG_INF("ANGLE: 0x%04X (degrees: %u.%02u)", 
-                    reg_value, degrees_x100 / 100, degrees_x100 % 100);
+        if (encspi_read_reg(ENCSPI_MAG, &mag.raw) == 0) {
+            print_mag(mag);
         }
 
-        /* Read all non-volatile registers in sequence */
+        if (encspi_read_reg(ENCSPI_ANGLEUNC, &angleUnc.raw) == 0) {
+            print_angle(angleUnc);
+        }
 
-         encspi_read_nv_registers();
-
+        if (encspi_read_reg(ENCSPI_ANGLECOM, &angleCom.raw) == 0) {
+            print_angle(angleCom);
+        }
 
         // Implement SPI communication with the encoder
         k_msleep(1000); // Adjust sleep time as necessary
     }
 }
+
+
+
+
+/*SHELL*/
+
+SHELL_CMD_REGISTER(encspi_read_nv, NULL, "Read encSPI NV registers", encspi_read_nv_registers);
