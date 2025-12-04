@@ -84,6 +84,22 @@ typedef union {
     } bits;
 } angle_reg_t;
 
+/* SETTINGS1 Register (0x0018) - Configuration settings 1 */
+typedef union {
+    uint16_t raw;
+    struct {
+        uint16_t iwidth    : 1;  /* Bit 0: Index pulse width (0=3LSB, 1=1LSB) */
+        uint16_t noiseset  : 1;  /* Bit 1: Noise setting */
+        uint16_t dir       : 1;  /* Bit 2: Rotation direction */
+        uint16_t uvw_abi   : 1;  /* Bit 3: PWM output (0=ABI+W as PWM, 1=UVW+I as PWM) */
+        uint16_t daecdis   : 1;  /* Bit 4: Disable DAE compensation (0=ON, 1=OFF) */
+        uint16_t reserved1 : 1;  /* Bit 5: Reserved */
+        uint16_t dataselect: 1;  /* Bit 6: Data select (0=DAECANG, 1=CORDICANG) */
+        uint16_t pwmon     : 1;  /* Bit 7: Enable PWM (requires UVW_ABI setting) */
+        uint16_t reserved2 : 8;  /* Bits 8-15: Reserved */
+    } bits;
+} settings1_reg_t;
+
 
 
 /* ============ Print functions for registers ============ */
@@ -128,6 +144,23 @@ static void print_angle(angle_reg_t reg)
     LOG_INF("ANGLE: 0x%04X", reg.raw);
     LOG_INF("  ANGLE [13:0]: %u (degrees: %u.%02u)", 
             reg.bits.angle, degrees_x100 / 100, degrees_x100 % 100);
+}
+
+static void print_settings1(settings1_reg_t reg)
+{
+    LOG_INF("SETTINGS1: 0x%04X", reg.raw);
+    LOG_INF("  IWIDTH     [0]: %u - Index pulse width (%s)", 
+            reg.bits.iwidth, reg.bits.iwidth ? "1 LSB" : "3 LSB");
+    LOG_INF("  NOISESET   [1]: %u - Noise setting", reg.bits.noiseset);
+    LOG_INF("  DIR        [2]: %u - Rotation direction", reg.bits.dir);
+    LOG_INF("  UVW_ABI    [3]: %u - PWM output (%s)", 
+            reg.bits.uvw_abi, reg.bits.uvw_abi ? "UVW, I=PWM" : "ABI, W=PWM");
+    LOG_INF("  DAECDIS    [4]: %u - DAE compensation (%s)", 
+            reg.bits.daecdis, reg.bits.daecdis ? "OFF" : "ON");
+    LOG_INF("  DATASELECT [6]: %u - Data at 0x3FFF (%s)", 
+            reg.bits.dataselect, reg.bits.dataselect ? "CORDICANG" : "DAECANG");
+    LOG_INF("  PWMON      [7]: %u - PWM (%s)", 
+            reg.bits.pwmon, reg.bits.pwmon ? "enabled" : "disabled");
 }
 
 /* ======================================================= */
@@ -206,6 +239,45 @@ static int encspi_read_reg(uint16_t reg_addr, uint16_t *data)
 	return 0;
 }
 
+/* encSPI write register - sends write command with data */
+static int encspi_write_reg(uint16_t reg_addr, uint16_t data)
+{
+	int err;
+	uint16_t rx_data = 0;
+
+	/* Build write command: bit15=parity, bit14=0 (write), bits13-0=address */
+	uint16_t tx_cmd = encspi_cmd(reg_addr, false);  /* false = write */
+
+	struct spi_buf tx_buf = {.buf = &tx_cmd, .len = sizeof(tx_cmd)};
+	struct spi_buf_set tx_buf_set = {.buffers = &tx_buf, .count = 1};
+	struct spi_buf rx_buf = {.buf = &rx_data, .len = sizeof(rx_data)};
+	struct spi_buf_set rx_buf_set = {.buffers = &rx_buf, .count = 1};
+
+	/* First transaction: send write command (address) */
+	err = spi_transceive_dt(&spispec, &tx_buf_set, &rx_buf_set);
+	if (err < 0) {
+		LOG_ERR("spi_transceive_dt() failed, err: %d", err);
+		return err;
+	}
+
+	/* Second transaction: send data with parity */
+	/* Data frame: bit15=parity, bit14=0, bits13-0=data */
+	tx_cmd = data & 0x3FFF;  /* 14-bit data */
+	if (calc_even_parity(tx_cmd)) {
+		tx_cmd |= (1 << 15);  /* Set parity bit */
+	}
+
+	err = spi_transceive_dt(&spispec, &tx_buf_set, &rx_buf_set);
+	if (err < 0) {
+		LOG_ERR("spi_transceive_dt() failed, err: %d", err);
+		return err;
+	}
+
+	LOG_DBG("Write reg 0x%04X = 0x%04X", reg_addr, data);
+
+	return 0;
+}
+
 /* Read all non-volatile registers using individual reads */
 static int encspi_read_nv_registers(void)   
 {
@@ -231,6 +303,26 @@ static int encspi_read_nv_registers(void)
 	return 0;
 }
 
+/* Set I/PWM .I is used as PWM */
+void encspi_set_ipwm(void)
+{
+    // Implementation for setting I/PWM mode
+    // Write SETTINGS1 register to set UVW_ABI bit
+    settings1_reg_t settings1;
+    if (encspi_read_reg(ENCSPI_SETTINGS1, &settings1.raw) != 0) {
+        LOG_ERR("Failed to read SETTINGS1 register");
+        return;
+    }
+    settings1.bits.uvw_abi = 1; // Set UVW_ABI to 1 for UVW + I as PWM
+    settings1.bits.pwmon = 1;   // Enable PWM
+    if (encspi_write_reg(ENCSPI_SETTINGS1, settings1.raw) != 0) {
+        LOG_ERR("Failed to write SETTINGS1 register");
+        return;
+    }
+}
+
+
+/* thread */
 void th_encSpi(void *arg1, void *arg2, void *arg3)
 {   
     LOG_DBG("SPI Encoder Thread Started");
@@ -267,21 +359,21 @@ void th_encSpi(void *arg1, void *arg2, void *arg3)
             }        
         }
 
-        if (encspi_read_reg(ENCSPI_DIAAGC, &diaagc.raw) == 0) {
-            print_diaagc(diaagc);
-        }
+        // if (encspi_read_reg(ENCSPI_DIAAGC, &diaagc.raw) == 0) {
+        //     print_diaagc(diaagc);
+        // }
 
-        if (encspi_read_reg(ENCSPI_MAG, &mag.raw) == 0) {
-            print_mag(mag);
-        }
+        // if (encspi_read_reg(ENCSPI_MAG, &mag.raw) == 0) {
+        //     print_mag(mag);
+        // }
 
-        if (encspi_read_reg(ENCSPI_ANGLEUNC, &angleUnc.raw) == 0) {
-            print_angle(angleUnc);
-        }
+        // if (encspi_read_reg(ENCSPI_ANGLEUNC, &angleUnc.raw) == 0) {
+        //     print_angle(angleUnc);
+        // }
 
-        if (encspi_read_reg(ENCSPI_ANGLECOM, &angleCom.raw) == 0) {
-            print_angle(angleCom);
-        }
+        // if (encspi_read_reg(ENCSPI_ANGLECOM, &angleCom.raw) == 0) {
+        //     print_angle(angleCom);
+        // }
 
         // Implement SPI communication with the encoder
         k_msleep(1000); // Adjust sleep time as necessary
@@ -294,3 +386,4 @@ void th_encSpi(void *arg1, void *arg2, void *arg3)
 /*SHELL*/
 
 SHELL_CMD_REGISTER(encspi_read_nv, NULL, "Read encSPI NV registers", encspi_read_nv_registers);
+SHELL_CMD_REGISTER(encspi_set_ipwm, NULL, "Set encSPI to I/PWM mode", encspi_set_ipwm);
