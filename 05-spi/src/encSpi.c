@@ -115,36 +115,36 @@ static void print_errfl(errfl_reg_t reg)
 static void print_prog(prog_reg_t reg)
 {
     LOG_INF("PROG: 0x%04X", reg.raw);
-    LOG_INF("  PROGEN  [3]: %u - Programming enable", reg.bits.progen);
-    LOG_INF("  OTPREF  [4]: %u - OTP refresh", reg.bits.otpref);
-    LOG_INF("  PROGOTP [5]: %u - OTP programming enable", reg.bits.progotp);
+    LOG_INF("  PROGEN  [0]: %u - Programming enable", reg.bits.progen);
+    LOG_INF("  OTPREF  [2]: %u - OTP refresh", reg.bits.otpref);
+    LOG_INF("  PROGOTP [3]: %u - Start OTP programming", reg.bits.progotp);
     LOG_INF("  PROGVER [6]: %u - Programming verify", reg.bits.progver);
 }
 
-static void print_diaagc(diaagc_reg_t reg)
-{
-    LOG_INF("DIAAGC: 0x%04X", reg.raw);
-    LOG_INF("  AGC  [7:0]:  %u (0x%02X) - Automatic gain control", reg.bits.agc, reg.bits.agc);
-    LOG_INF("  LF   [8]:    %u - Loops finished (%s)", reg.bits.lf, 
-            reg.bits.lf ? "offset loop finished" : "offset loops not ready");
-    LOG_INF("  COF  [9]:    %u - CORDIC overflow", reg.bits.cof);
-    LOG_INF("  MAGH [10]:   %u - Magnetic field too high (AGC=0x00)", reg.bits.magh);
-    LOG_INF("  MAGL [11]:   %u - Magnetic field too low (AGC=0xFF)", reg.bits.magl);
-}
+// static void print_diaagc(diaagc_reg_t reg)
+// {
+//     LOG_INF("DIAAGC: 0x%04X", reg.raw);
+//     LOG_INF("  AGC  [7:0]:  %u (0x%02X) - Automatic gain control", reg.bits.agc, reg.bits.agc);
+//     LOG_INF("  LF   [8]:    %u - Loops finished (%s)", reg.bits.lf, 
+//             reg.bits.lf ? "offset loop finished" : "offset loops not ready");
+//     LOG_INF("  COF  [9]:    %u - CORDIC overflow", reg.bits.cof);
+//     LOG_INF("  MAGH [10]:   %u - Magnetic field too high (AGC=0x00)", reg.bits.magh);
+//     LOG_INF("  MAGL [11]:   %u - Magnetic field too low (AGC=0xFF)", reg.bits.magl);
+// }
 
-static void print_mag(mag_reg_t reg)
-{
-    LOG_INF("MAG: 0x%04X", reg.raw);
-    LOG_INF("  CMAG [13:0]: %u - CORDIC magnitude", reg.bits.cmag);
-}
+// static void print_mag(mag_reg_t reg)
+// {
+//     LOG_INF("MAG: 0x%04X", reg.raw);
+//     LOG_INF("  CMAG [13:0]: %u - CORDIC magnitude", reg.bits.cmag);
+// }
 
-static void print_angle(angle_reg_t reg)
-{
-    uint32_t degrees_x100 = ((uint32_t)reg.bits.angle * 36000) / 16384;
-    LOG_INF("ANGLE: 0x%04X", reg.raw);
-    LOG_INF("  ANGLE [13:0]: %u (degrees: %u.%02u)", 
-            reg.bits.angle, degrees_x100 / 100, degrees_x100 % 100);
-}
+// static void print_angle(angle_reg_t reg)
+// {
+//     uint32_t degrees_x100 = ((uint32_t)reg.bits.angle * 36000) / 16384;
+//     LOG_INF("ANGLE: 0x%04X", reg.raw);
+//     LOG_INF("  ANGLE [13:0]: %u (degrees: %u.%02u)", 
+//             reg.bits.angle, degrees_x100 / 100, degrees_x100 % 100);
+// }
 
 static void print_settings1(settings1_reg_t reg)
 {
@@ -279,7 +279,7 @@ static int encspi_write_reg(uint16_t reg_addr, uint16_t data)
 }
 
 /* Read all non-volatile registers using individual reads */
-static int encspi_read_nv_registers(void)   
+static int encspi_read_nv_registers_internal(void)
 {
 	uint16_t zposm;
 	uint16_t zposl;
@@ -303,22 +303,177 @@ static int encspi_read_nv_registers(void)
 	return 0;
 }
 
-/* Set I/PWM .I is used as PWM */
-void encspi_set_ipwm(void)
+/* Shell wrapper for encspi_read_nv_registers */
+static int encspi_read_nv_registers(const struct shell *sh, size_t argc, char **argv)
 {
-    // Implementation for setting I/PWM mode
-    // Write SETTINGS1 register to set UVW_ABI bit
+	return encspi_read_nv_registers_internal();
+}
+
+
+/* Set I/PWM pin to Index pulse mode (pulse at zero position) */
+static int encspi_set_index(const struct shell *sh, size_t argc, char **argv)
+{
     settings1_reg_t settings1;
     if (encspi_read_reg(ENCSPI_SETTINGS1, &settings1.raw) != 0) {
         LOG_ERR("Failed to read SETTINGS1 register");
-        return;
+        return -1;
     }
-    settings1.bits.uvw_abi = 1; // Set UVW_ABI to 1 for UVW + I as PWM
-    settings1.bits.pwmon = 1;   // Enable PWM
+    settings1.bits.uvw_abi = 0; // abi operating , w used as pwm
+    settings1.bits.pwmon = 1;   // enable pwm
     if (encspi_write_reg(ENCSPI_SETTINGS1, settings1.raw) != 0) {
         LOG_ERR("Failed to write SETTINGS1 register");
-        return;
+        return -1;
     }
+    LOG_INF("I/PWM pin set to Index pulse mode");
+    print_settings1(settings1);
+    return 0;
+}
+
+/*Program OTP*/
+static int encspi_program_otp(const struct shell *sh, size_t argc, char **argv)
+{
+    prog_reg_t prog;
+    // Enable programming
+    shell_print(sh, "Starting OTP programming...");
+    if (encspi_read_reg(ENCSPI_PROG, &prog.raw) != 0) {
+        shell_print(sh, "Failed to read PROG register");
+        return -1;
+    }
+    shell_print(sh, "PROG before: 0x%04X", prog.raw);
+    prog.raw = 0; // Clear PROG register
+    shell_print(sh, "Enabling programming...");
+    prog.bits.progen = 1; // Enable programming
+    if (encspi_write_reg(ENCSPI_PROG, prog.raw) != 0) {
+        shell_print(sh, "Failed to write PROG register");
+        return -1;
+    }
+
+    // Start OTP programming
+    prog.raw = 0; // Clear PROG register
+    prog.bits.progotp = 1; // Start programming
+    if (encspi_write_reg(ENCSPI_PROG, prog.raw) != 0) {
+        shell_print(sh, "Failed to write PROG register for OTP programming");
+        return -1;
+    }
+
+    shell_print(sh, "OTP programming started");
+    // Wait for programming to complete (poll PROG register)
+    do {
+        k_msleep(100); // Delay between polls
+        if (encspi_read_reg(ENCSPI_PROG, &prog.raw) != 0) {
+            shell_print(sh, "Failed to read PROG register during OTP programming");
+            return -1;
+        }
+        shell_print(sh, "PROG status: 0x%04X", prog.raw);
+    } while (prog.raw != 0x01);
+
+    shell_print(sh, "OTP programming completed - run encspi_otp_finish to finalize");
+    return 0;
+}
+
+/* Finish OTP - disable PROGEN and refresh OTP content */
+static int encspi_otp_finish(const struct shell *sh, size_t argc, char **argv)
+{
+    prog_reg_t prog;
+    
+    // Read current PROG state
+    if (encspi_read_reg(ENCSPI_PROG, &prog.raw) != 0) {
+        shell_print(sh, "Failed to read PROG register");
+        return -1;
+    }
+    shell_print(sh, "PROG before: 0x%04X", prog.raw);
+
+    // clear the the non-volatile memory content with the OTP programmed content
+    shell_print(sh, "Clearing non-volatile memory content with OTP programmed content...");
+    if (encspi_write_reg(ENCSPI_ZPOSM, 0x00) != 0) {
+        shell_print(sh, "Failed to clear ZPOSM register");
+        return -1;
+    }
+    if (encspi_write_reg(ENCSPI_ZPOSL, 0x00) != 0) {
+        shell_print(sh, "Failed to clear ZPOSL register");
+        return -1;
+    }
+    if (encspi_write_reg(ENCSPI_SETTINGS1, 0x00) != 0) {
+        shell_print(sh, "Failed to clear SETTINGS1 register");
+        return -1;
+    }
+    if (encspi_write_reg(ENCSPI_SETTINGS2, 0x00) != 0) {
+        shell_print(sh, "Failed to clear SETTINGS2 register");
+        return -1;
+    }
+
+    // Set Guarband to disable PROGEN
+    shell_print(sh, "setguarband.");
+    if (encspi_write_reg(ENCSPI_PROG, 0x40) != 0) {
+        shell_print(sh, "Failed to write PROG register");
+        return -1;
+    }
+
+    //set otpref to refresh
+    shell_print(sh, "Triggering OTP refresh...");
+    prog.bits.otpref = 1;
+    if (encspi_write_reg(ENCSPI_PROG, prog.raw) != 0) {
+        shell_print(sh, "Failed to trigger OTP refresh");
+        return -1;
+    }
+    k_msleep(10);
+
+    //read non-volatile registers to verify
+	uint16_t zposm;
+	uint16_t zposl;
+	uint16_t settings1;
+	uint16_t settings2;
+	uint16_t red;
+    
+	if (encspi_read_reg(ENCSPI_ZPOSM, &zposm) != 0) return -1;
+	if (encspi_read_reg(ENCSPI_ZPOSL, &zposl) != 0) return -1;
+	if (encspi_read_reg(ENCSPI_SETTINGS1, &settings1) != 0) return -1;
+	if (encspi_read_reg(ENCSPI_SETTINGS2, &settings2) != 0) return -1;
+	if (encspi_read_reg(ENCSPI_RED, &red) != 0) return -1;
+
+    shell_print(sh, "=== NV Registers after OTP refresh ===");
+    shell_print(sh, "ZPOSM:     0x%04X", zposm);
+    shell_print(sh, "ZPOSL:     0x%04X", zposl);
+    shell_print(sh, "SETTINGS1: 0x%04X", settings1);
+    shell_print(sh, "SETTINGS2: 0x%04X", settings2);
+    shell_print(sh, "RED:       0x%04X", red);
+
+    // // Try to disable programming enable by writing 0
+    // prog.raw = 0;
+    // if (encspi_write_reg(ENCSPI_PROG, prog.raw) != 0) {
+    //     shell_print(sh, "Failed to write PROG register");
+    //     return -1;
+    // }
+    // shell_print(sh, "Wrote PROG = 0x0000");
+
+    // // Read back to verify
+    // if (encspi_read_reg(ENCSPI_PROG, &prog.raw) != 0) {
+    //     shell_print(sh, "Failed to read PROG register");
+    //     return -1;
+    // }
+    // shell_print(sh, "PROG after write: 0x%04X", prog.raw);
+
+    // if (prog.bits.progen != 0) {
+    //     shell_print(sh, "PROGEN still set - this is normal after OTP programming!");
+    //     shell_print(sh, "PROGEN can only be cleared by POWER CYCLE.");
+    //     shell_print(sh, "Power off the board, then power on again.");
+    // } else {
+    //     // If we got here, do OTP refresh
+    //     prog.bits.otpref = 1;
+    //     if (encspi_write_reg(ENCSPI_PROG, prog.raw) != 0) {
+    //         shell_print(sh, "Failed to trigger OTP refresh");
+    //         return -1;
+    //     }
+    //     k_msleep(10);
+        
+    //     prog.raw = 0;
+    //     encspi_write_reg(ENCSPI_PROG, prog.raw);
+        
+    //     LOG_INF("OTP refresh complete");
+    // }
+    
+    // print_prog(prog);
+    return 0;
 }
 
 
@@ -334,46 +489,28 @@ void th_encSpi(void *arg1, void *arg2, void *arg3)
     /* Register unions */
     errfl_reg_t errfl;
     prog_reg_t prog;
-    diaagc_reg_t diaagc;
-    mag_reg_t mag;
-    angle_reg_t angleUnc; // uncompensated angle
-    angle_reg_t angleCom; // compensated angle
+
 
     /* Read all non-volatile registers at startup */
-    encspi_read_nv_registers();
+    encspi_read_nv_registers_internal();
 
     // SPI encoder handling code goes here
     while (1) {
 
-        if (encspi_read_reg(ENCSPI_ERRFL, &errfl.raw) == 0) {
-            if (errfl.raw  != 0){
-                LOG_WRN("Encoder Error Flags Set!");
-                print_errfl(errfl);
-            }
-        }
-
-        if (encspi_read_reg(ENCSPI_PROG, &prog.raw) == 0) {
-            if (prog.bits.progen != 0) {
-                print_prog(prog);
-                LOG_WRN("Encoder PROGEN is disabled!");
-            }        
-        }
-
-        // if (encspi_read_reg(ENCSPI_DIAAGC, &diaagc.raw) == 0) {
-        //     print_diaagc(diaagc);
+        // if (encspi_read_reg(ENCSPI_ERRFL, &errfl.raw) == 0) {
+        //     if (errfl.raw  != 0){
+        //         LOG_WRN("Encoder Error Flags Set!");
+        //         print_errfl(errfl);
+        //     }
         // }
 
-        // if (encspi_read_reg(ENCSPI_MAG, &mag.raw) == 0) {
-        //     print_mag(mag);
+        // if (encspi_read_reg(ENCSPI_PROG, &prog.raw) == 0) {
+        //     if (prog.bits.progen != 0) {
+        //         print_prog(prog);
+        //         LOG_WRN("Encoder PROGEN is still enabled! Run encspi_otp_finish to complete.");
+        //     }        
         // }
 
-        // if (encspi_read_reg(ENCSPI_ANGLEUNC, &angleUnc.raw) == 0) {
-        //     print_angle(angleUnc);
-        // }
-
-        // if (encspi_read_reg(ENCSPI_ANGLECOM, &angleCom.raw) == 0) {
-        //     print_angle(angleCom);
-        // }
 
         // Implement SPI communication with the encoder
         k_msleep(1000); // Adjust sleep time as necessary
@@ -386,4 +523,6 @@ void th_encSpi(void *arg1, void *arg2, void *arg3)
 /*SHELL*/
 
 SHELL_CMD_REGISTER(encspi_read_nv, NULL, "Read encSPI NV registers", encspi_read_nv_registers);
-SHELL_CMD_REGISTER(encspi_set_ipwm, NULL, "Set encSPI to I/PWM mode", encspi_set_ipwm);
+SHELL_CMD_REGISTER(encspi_set_index, NULL, "Set I/PWM pin to Index pulse mode", encspi_set_index);
+SHELL_CMD_REGISTER(encspi_program_otp, NULL, "Program encSPI OTP", encspi_program_otp);
+SHELL_CMD_REGISTER(encspi_otp_finish, NULL, "Finish OTP (disable PROGEN, refresh)", encspi_otp_finish);
