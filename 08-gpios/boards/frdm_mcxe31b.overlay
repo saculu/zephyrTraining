@@ -1,0 +1,19 @@
+/*
+ * Copyright 2025 NXP
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/ {
+	leds {
+		my_signal: my_signal {
+			gpios = <&gpiod_h 15 GPIO_ACTIVE_HIGH>;
+			label = "My Signal PTD31";
+		};
+	};
+};
+
+&gpiod_h {
+	status = "okay";
+};
+
+
