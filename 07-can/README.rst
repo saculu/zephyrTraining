@@ -48,3 +48,5 @@ Sample Output
     D: From subscriber -> Acc x=2, y=2, z=2
 
 Exit QEMU by pressing :kbd:`CTRL+A` :kbd:`x`.
+
+working correctly with baud rate 500Kb or lower, not working with 1Mb
