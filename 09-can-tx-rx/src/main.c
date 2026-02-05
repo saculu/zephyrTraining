@@ -214,13 +214,6 @@ int main(void)
 		return 0;
 	}
 
-#ifdef CONFIG_LOOPBACK_MODE
-	ret = can_set_mode(can_dev, CAN_MODE_LOOPBACK);
-	if (ret != 0) {
-		printf("Error setting CAN mode [%d]", ret);
-		return 0;
-	}
-#endif
 	ret = can_start(can_dev);
 	if (ret != 0) {
 		printf("Error starting CAN controller [%d]", ret);
