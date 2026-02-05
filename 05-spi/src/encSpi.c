@@ -171,7 +171,7 @@ static void print_settings1(settings1_reg_t reg)
 /* encspi uses SPI Mode 1: CPOL=0, CPHA=1 */
 #define SPIOP      (SPI_WORD_SET(16) | SPI_TRANSFER_MSB | SPI_MODE_CPHA)
 
-struct spi_dt_spec spispec = SPI_DT_SPEC_GET(DT_NODELABEL(encspi), SPIOP, 0);
+struct spi_dt_spec spispec = SPI_DT_SPEC_GET(DT_NODELABEL(encspi), SPIOP);
 
 /* Calculate even parity for encSPI command frame */
 static uint8_t calc_even_parity(uint16_t value)
@@ -286,6 +286,8 @@ static int encspi_read_nv_registers_internal(void)
 	uint16_t settings1;
 	uint16_t settings2;
 	uint16_t red;
+
+    LOG_INF( "if using nucleo power the board with 3.3V");
     
 	if (encspi_read_reg(ENCSPI_ZPOSM, &zposm) != 0) return -1;
 	if (encspi_read_reg(ENCSPI_ZPOSL, &zposl) != 0) return -1;
@@ -313,6 +315,7 @@ static int encspi_read_nv_registers(const struct shell *sh, size_t argc, char **
 /* Set I/PWM pin to Index pulse mode (pulse at zero position) */
 static int encspi_set_index(const struct shell *sh, size_t argc, char **argv)
 {
+    shell_print(sh, "if using nucleo power the board with 3.3V");
     settings1_reg_t settings1;
     if (encspi_read_reg(ENCSPI_SETTINGS1, &settings1.raw) != 0) {
         LOG_ERR("Failed to read SETTINGS1 register");
@@ -418,25 +421,10 @@ static int encspi_otp_finish(const struct shell *sh, size_t argc, char **argv)
     }
     k_msleep(10);
 
-    //read non-volatile registers to verify
-	uint16_t zposm;
-	uint16_t zposl;
-	uint16_t settings1;
-	uint16_t settings2;
-	uint16_t red;
-    
-	if (encspi_read_reg(ENCSPI_ZPOSM, &zposm) != 0) return -1;
-	if (encspi_read_reg(ENCSPI_ZPOSL, &zposl) != 0) return -1;
-	if (encspi_read_reg(ENCSPI_SETTINGS1, &settings1) != 0) return -1;
-	if (encspi_read_reg(ENCSPI_SETTINGS2, &settings2) != 0) return -1;
-	if (encspi_read_reg(ENCSPI_RED, &red) != 0) return -1;
 
-    shell_print(sh, "=== NV Registers after OTP refresh ===");
-    shell_print(sh, "ZPOSM:     0x%04X", zposm);
-    shell_print(sh, "ZPOSL:     0x%04X", zposl);
-    shell_print(sh, "SETTINGS1: 0x%04X", settings1);
-    shell_print(sh, "SETTINGS2: 0x%04X", settings2);
-    shell_print(sh, "RED:       0x%04X", red);
+
+    shell_print(sh, "OTP refresh complete. Power off the board");
+    shell_print(sh, "Power on the board and check settings parameters to verify OTP programming was successful.");
 
     // // Try to disable programming enable by writing 0
     // prog.raw = 0;
