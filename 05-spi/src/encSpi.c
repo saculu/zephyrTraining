@@ -102,50 +102,6 @@ typedef union {
 
 
 
-/* ============ Print functions for registers ============ */
-
-static void print_errfl(errfl_reg_t reg)
-{
-    LOG_INF("ERRFL: 0x%04X", reg.raw);
-    LOG_INF("  FRERR   [0]: %u - Framing error", reg.bits.frerr);
-    LOG_INF("  INVCOMM [1]: %u - Invalid command", reg.bits.invcomm);
-    LOG_INF("  PARERR  [2]: %u - Parity error", reg.bits.parerr);
-}
-
-static void print_prog(prog_reg_t reg)
-{
-    LOG_INF("PROG: 0x%04X", reg.raw);
-    LOG_INF("  PROGEN  [0]: %u - Programming enable", reg.bits.progen);
-    LOG_INF("  OTPREF  [2]: %u - OTP refresh", reg.bits.otpref);
-    LOG_INF("  PROGOTP [3]: %u - Start OTP programming", reg.bits.progotp);
-    LOG_INF("  PROGVER [6]: %u - Programming verify", reg.bits.progver);
-}
-
-// static void print_diaagc(diaagc_reg_t reg)
-// {
-//     LOG_INF("DIAAGC: 0x%04X", reg.raw);
-//     LOG_INF("  AGC  [7:0]:  %u (0x%02X) - Automatic gain control", reg.bits.agc, reg.bits.agc);
-//     LOG_INF("  LF   [8]:    %u - Loops finished (%s)", reg.bits.lf, 
-//             reg.bits.lf ? "offset loop finished" : "offset loops not ready");
-//     LOG_INF("  COF  [9]:    %u - CORDIC overflow", reg.bits.cof);
-//     LOG_INF("  MAGH [10]:   %u - Magnetic field too high (AGC=0x00)", reg.bits.magh);
-//     LOG_INF("  MAGL [11]:   %u - Magnetic field too low (AGC=0xFF)", reg.bits.magl);
-// }
-
-// static void print_mag(mag_reg_t reg)
-// {
-//     LOG_INF("MAG: 0x%04X", reg.raw);
-//     LOG_INF("  CMAG [13:0]: %u - CORDIC magnitude", reg.bits.cmag);
-// }
-
-// static void print_angle(angle_reg_t reg)
-// {
-//     uint32_t degrees_x100 = ((uint32_t)reg.bits.angle * 36000) / 16384;
-//     LOG_INF("ANGLE: 0x%04X", reg.raw);
-//     LOG_INF("  ANGLE [13:0]: %u (degrees: %u.%02u)", 
-//             reg.bits.angle, degrees_x100 / 100, degrees_x100 % 100);
-// }
-
 static void print_settings1(settings1_reg_t reg)
 {
     LOG_INF("SETTINGS1: 0x%04X", reg.raw);
@@ -201,7 +157,7 @@ static uint16_t encspi_cmd(uint16_t reg_addr, bool read)
 int err;
 
 /* Thread function prototypes */
-void th_encSpi(void *, void *, void *);
+int th_encSpi(void *, void *, void *);
 
 K_THREAD_DEFINE(encSpi, STACK_SIZE, th_encSpi, NULL, NULL, NULL,
 		    PRIORITY, 0, 0);
@@ -426,47 +382,12 @@ static int encspi_otp_finish(const struct shell *sh, size_t argc, char **argv)
     shell_print(sh, "OTP refresh complete. Power off the board");
     shell_print(sh, "Power on the board and check settings parameters to verify OTP programming was successful.");
 
-    // // Try to disable programming enable by writing 0
-    // prog.raw = 0;
-    // if (encspi_write_reg(ENCSPI_PROG, prog.raw) != 0) {
-    //     shell_print(sh, "Failed to write PROG register");
-    //     return -1;
-    // }
-    // shell_print(sh, "Wrote PROG = 0x0000");
-
-    // // Read back to verify
-    // if (encspi_read_reg(ENCSPI_PROG, &prog.raw) != 0) {
-    //     shell_print(sh, "Failed to read PROG register");
-    //     return -1;
-    // }
-    // shell_print(sh, "PROG after write: 0x%04X", prog.raw);
-
-    // if (prog.bits.progen != 0) {
-    //     shell_print(sh, "PROGEN still set - this is normal after OTP programming!");
-    //     shell_print(sh, "PROGEN can only be cleared by POWER CYCLE.");
-    //     shell_print(sh, "Power off the board, then power on again.");
-    // } else {
-    //     // If we got here, do OTP refresh
-    //     prog.bits.otpref = 1;
-    //     if (encspi_write_reg(ENCSPI_PROG, prog.raw) != 0) {
-    //         shell_print(sh, "Failed to trigger OTP refresh");
-    //         return -1;
-    //     }
-    //     k_msleep(10);
-        
-    //     prog.raw = 0;
-    //     encspi_write_reg(ENCSPI_PROG, prog.raw);
-        
-    //     LOG_INF("OTP refresh complete");
-    // }
-    
-    // print_prog(prog);
     return 0;
 }
 
 
 /* thread */
-void th_encSpi(void *arg1, void *arg2, void *arg3)
+int th_encSpi(void *arg1, void *arg2, void *arg3)
 {   
     LOG_DBG("SPI Encoder Thread Started");
     err = spi_is_ready_dt(&spispec);
@@ -474,35 +395,18 @@ void th_encSpi(void *arg1, void *arg2, void *arg3)
         LOG_ERR("Error: SPI device is not ready, err: %d", err);
     }
 
-    /* Register unions */
-    errfl_reg_t errfl;
-    prog_reg_t prog;
-
-
     /* Read all non-volatile registers at startup */
     encspi_read_nv_registers_internal();
 
-    // SPI encoder handling code goes here
-    while (1) {
-
-        // if (encspi_read_reg(ENCSPI_ERRFL, &errfl.raw) == 0) {
-        //     if (errfl.raw  != 0){
-        //         LOG_WRN("Encoder Error Flags Set!");
-        //         print_errfl(errfl);
-        //     }
-        // }
-
-        // if (encspi_read_reg(ENCSPI_PROG, &prog.raw) == 0) {
-        //     if (prog.bits.progen != 0) {
-        //         print_prog(prog);
-        //         LOG_WRN("Encoder PROGEN is still enabled! Run encspi_otp_finish to complete.");
-        //     }        
-        // }
-
-
-        // Implement SPI communication with the encoder
-        k_msleep(1000); // Adjust sleep time as necessary
-    }
+    // Main loop can be used for periodic tasks or left empty if using shell commands for interaction
+    // shell thread has by default has priority 0, which is higher than this thread, so shell commands will preempt this thread when invoked
+    
+    // while (1) {
+    //     // Implement SPI communication with the encoder
+    //     k_msleep(1000); // Adjust sleep time as necessary
+    // }
+    // finish this thread since all interactions are done via shell commands
+    return 0;
 }
 
 
